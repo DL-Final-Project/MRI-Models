@@ -4,20 +4,20 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization, GlobalAveragePooling2D, Activation
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 
-# Make sure to replace these with the correct paths on your system
+# Set the directories in the project
 train_dir = "Training"
-test_dir  = "Testing"
+test_dir = "Testing"
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
 # -----------------------------------------------------
-# We use data augmentation on the training set to help the model generalize
+# Use data augmentation on the training set to help the model generalize
 train_datagen = ImageDataGenerator(
-    rescale=1./255,
+    rescale=1. / 255,
     rotation_range=15,
     width_shift_range=0.1,
     height_shift_range=0.1,
@@ -27,11 +27,11 @@ train_datagen = ImageDataGenerator(
 )
 
 # For test data, just rescale
-test_datagen = ImageDataGenerator(rescale=1./255)
+test_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
 batch_size = 32
-img_size = (224, 224)
+img_size = (512, 512)
 
 train_generator = train_datagen.flow_from_directory(
     train_dir,
@@ -53,29 +53,36 @@ test_generator = test_datagen.flow_from_directory(
 # -----------------------------------------------------
 model = Sequential([
     # Block 1
-    Conv2D(32, (3,3), activation='relu', input_shape=(224, 224, 3)),
+    Conv2D(64, (22, 22), strides=2, input_shape=(512, 512, 3)),
+    MaxPooling2D(pool_size=(4, 4)),
     BatchNormalization(),
-    MaxPooling2D(pool_size=(2,2)),
+
 
     # Block 2
-    Conv2D(64, (3,3), activation='relu'),
+    Conv2D(128, (11, 11), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
     BatchNormalization(),
-    MaxPooling2D(pool_size=(2,2)),
 
     # Block 3
-    Conv2D(128, (3,3), activation='relu'),
+    Conv2D(256, (7, 7), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
     BatchNormalization(),
-    MaxPooling2D(pool_size=(2,2)),
-    
-    # Block 4
-    Conv2D(256, (3,3), activation='relu'),
-    BatchNormalization(),
-    MaxPooling2D(pool_size=(2,2)),
 
-    Flatten(),
+    # Block 4
+    Conv2D(512, (3, 3), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
+    BatchNormalization(),
+
+    GlobalAveragePooling2D(),
+    Activation("relu"),
+
+    Dense(1024, activation='relu'),
+    BatchNormalization(),
+    Dense(512, activation='relu'),
+    BatchNormalization(),
     Dense(256, activation='relu'),
     BatchNormalization(),
-    Dropout(0.5),
+    Dropout(0.2),
     Dense(4, activation='softmax')  # 4 classes: glioma, meningioma, pituitary, no_tumor
 ])
 
