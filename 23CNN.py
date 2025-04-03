@@ -2,15 +2,27 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization, GlobalAveragePooling2D, Activation
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
+import pandas as pd
+
+def create_df(image_path):
+    classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
+                                 for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
+                                 for image in os.listdir(os.path.join(image_path, label))])
+
+    image_df = pd.DataFrame({'Class Path': class_paths, 'Class': classes})
+    return image_df
 
 # Set the directories in the project
-train_dir = "Training"
-test_dir = "Testing"
+train_df = create_df("Training")
+test_df = create_df("Testing")
+
+train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -33,15 +45,29 @@ test_datagen = ImageDataGenerator(rescale=1. / 255)
 batch_size = 32
 img_size = (512, 512)
 
-train_generator = train_datagen.flow_from_directory(
-    train_dir,
+train_generator = train_datagen.flow_from_dataframe(
+    train_df,
+    x_col='Class Path',
+    y_col='Class',
     target_size=img_size,
     batch_size=batch_size,
     class_mode='categorical'
 )
 
-test_generator = test_datagen.flow_from_directory(
-    test_dir,
+valid_generator = test_datagen.flow_from_dataframe(
+    valid_df,
+    x_col='Class Path',
+    y_col='Class',
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False  # important so predictions and labels align
+)
+
+test_generator = test_datagen.flow_from_dataframe(
+    test_df,
+    x_col='Class Path',
+    y_col='Class',
     target_size=img_size,
     batch_size=batch_size,
     class_mode='categorical',
@@ -109,7 +135,7 @@ epochs = 25
 
 history = model.fit(
     train_generator,
-    validation_data=test_generator,
+    validation_data=valid_generator,
     epochs=epochs,
     callbacks=[early_stopping, reduce_lr]
 )
