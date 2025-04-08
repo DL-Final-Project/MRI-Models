@@ -171,7 +171,7 @@ y_true = test_generator.classes
 # Print classification report
 labels = list(train_generator.class_indices.keys())
 print("Classification Report:")
-print(classification_report(y_true, y_pred, target_names=labels))S
+print(classification_report(y_true, y_pred, target_names=labels))
 
 # Confusion matrix
 cm = confusion_matrix(y_true, y_pred)
