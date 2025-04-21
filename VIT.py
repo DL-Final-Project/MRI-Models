@@ -8,23 +8,23 @@ from keras.optimizers import Adam
 from sklearn.metrics import classification_report, confusion_matrix, recall_score
 import matplotlib.pyplot as plt
 
-# Paths & Params
+#paths and params
 train_dir = "Training"
 test_dir = "Testing"
 img_size = (224, 224)
 batch_size = 32
 num_classes = 4
 
-# Data Generators
+#data gen
 train_datagen = ImageDataGenerator(
     rescale=1./255,
-    rotation_range=15,
-    width_shift_range=0.1,
-    height_shift_range=0.1,
-    zoom_range=0.1,
-    horizontal_flip=True,
+    rotation_range=15, #make some small changes to images 
+    width_shift_range=0.1, #make some small changes to images 
+    height_shift_range=0.1, #make some small changes to images 
+    zoom_range=0.1, #make some small changes to images 
+    horizontal_flip=True, #make some small changes to images 
     fill_mode='nearest',
-    validation_split=0.2
+    validation_split=0.2 #add validation (required for project)
 )
 
 train_generator = train_datagen.flow_from_directory(
@@ -54,7 +54,7 @@ test_generator = test_datagen.flow_from_directory(
     shuffle=False
 )
 
-# Load ViT model backbone from vit_keras
+#load ViT model backbone from vit_keras
 vit_base = vit.vit_b16(
     image_size=img_size[0],
     activation='softmax',
@@ -63,10 +63,9 @@ vit_base = vit.vit_b16(
     pretrained_top=False
 )
 
-# Build custom classification model
+#build class model
 inputs = layers.Input(shape=(img_size[0], img_size[1], 3))
 x = vit_base(inputs)
-#x = layers.GlobalAveragePooling1D()(x)
 x = layers.Dense(128, activation='relu')(x)
 x = layers.Dropout(0.5)(x)
 outputs = layers.Dense(num_classes, activation='softmax')(x)
@@ -80,7 +79,7 @@ vit_model.compile(
 
 vit_model.summary()
 
-# Train
+#train
 callbacks = [
     EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
     ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbose=1)
@@ -89,17 +88,17 @@ callbacks = [
 history = vit_model.fit(
     train_generator,
     validation_data=val_generator,
-    epochs=25,
+    epochs=20,
     callbacks=callbacks
 )
 
-# Evaluate
+#eval
 test_loss, test_acc, test_recall = vit_model.evaluate(test_generator)
 print(f"Test Loss: {test_loss:.4f}")
 print(f"Test Accuracy: {test_acc:.4f}")
 print(f"Test Recall: {test_recall:.4f}")
 
-# Predictions
+#predict
 Y_pred = vit_model.predict(test_generator)
 y_pred = np.argmax(Y_pred, axis=1)
 y_true = test_generator.classes
@@ -107,7 +106,7 @@ y_true = test_generator.classes
 macro_recall = recall_score(y_true, y_pred, average='macro')
 print(f"Macro Recall (sklearn): {macro_recall:.4f}")
 
-# Plot
+#plot
 plt.figure()
 plt.plot(history.history['accuracy'], label='train_accuracy')
 plt.plot(history.history['val_accuracy'], label='val_accuracy')
@@ -128,14 +127,14 @@ plt.show()
 
 plt.figure()
 plt.plot(history.history['recall'], label='train_recall')
-plt.plot(history.history['val_recall'], label='val_recall')
+plt.plot(history.history['val_recall'], label='val_recall') #using recall as our primary indicator
 plt.xlabel('Epoch')
 plt.ylabel('Recall')
 plt.title('ViT Recall')
 plt.legend()
 plt.show()
 
-# Classification Report
+#class report
 labels = list(train_generator.class_indices.keys())
 print("Classification Report:")
 print(classification_report(y_true, y_pred, target_names=labels))
