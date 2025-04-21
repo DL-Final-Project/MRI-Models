@@ -187,3 +187,5 @@ print(classification_report(y_true, y_pred, target_names=labels))
 cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
+
+model.save('23CNN.keras')

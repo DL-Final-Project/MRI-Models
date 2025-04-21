@@ -121,9 +121,25 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 25
+epochs = 10
 
 history = model.fit(
+    train_generator,
+    validation_data=valid_generator,
+    epochs=epochs,
+    callbacks=[early_stopping, reduce_lr]
+)
+
+base_model.trainable = True
+epochs = 20
+
+model.compile(
+    optimizer=Adam(learning_rate=0.00001),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+history2 = model.fit(
     train_generator,
     validation_data=valid_generator,
     epochs=epochs,
@@ -177,3 +193,5 @@ print(classification_report(y_true, y_pred, target_names=labels))
 cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
+
+model.save('resmodel.keras')
