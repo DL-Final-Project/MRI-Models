@@ -111,7 +111,7 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 25
+epochs = 40
 
 history = model.fit(
     train_generator,

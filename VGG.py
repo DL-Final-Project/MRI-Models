@@ -9,6 +9,7 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropou
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 import pandas as pd
+from tensorflow.keras.applications import VGG16
 
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
@@ -43,7 +44,7 @@ test_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
 batch_size = 32
-img_size = (512, 512)
+img_size = (224, 224)
 
 train_generator = train_datagen.flow_from_dataframe(
     train_df,
@@ -77,27 +78,16 @@ test_generator = test_datagen.flow_from_dataframe(
 # -----------------------------------------------------
 # 2) Define a CNN Model
 # -----------------------------------------------------
+base_model = VGG16(
+    include_top=False,
+    weights='imagenet',
+    input_shape=(224,224,3))
+
+base_model.trainable = False
+
 model = Sequential([
     # Block 1
-    Conv2D(64, (22, 22), strides=2, input_shape=(512, 512, 1)),
-    MaxPooling2D(pool_size=(4, 4)),
-    BatchNormalization(),
-
-
-    # Block 2
-    Conv2D(128, (11, 11), strides=2, padding='same'),
-    MaxPooling2D(pool_size=(2, 2)),
-    BatchNormalization(),
-
-    # Block 3
-    Conv2D(256, (7, 7), strides=2, padding='same'),
-    MaxPooling2D(pool_size=(2, 2)),
-    BatchNormalization(),
-
-    # Block 4
-    Conv2D(512, (3, 3), strides=2, padding='same'),
-    MaxPooling2D(pool_size=(2, 2)),
-    BatchNormalization(),
+    base_model,
 
     GlobalAveragePooling2D(),
     Activation("relu"),
@@ -131,9 +121,25 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 40
+epochs = 10
 
 history = model.fit(
+    train_generator,
+    validation_data=valid_generator,
+    epochs=epochs,
+    callbacks=[early_stopping, reduce_lr]
+)
+
+base_model.trainable = True
+epochs = 20
+
+model.compile(
+    optimizer=Adam(learning_rate=0.00001),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+history2 = model.fit(
     train_generator,
     validation_data=valid_generator,
     epochs=epochs,
@@ -188,4 +194,4 @@ cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
 
-model.save('23CNN.keras')
+model.save('vgg16model.keras')
