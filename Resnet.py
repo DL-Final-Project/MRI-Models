@@ -47,7 +47,7 @@ batch_size = 32
 img_size = (224, 224)
 
 train_generator = train_datagen.flow_from_dataframe(
-    train_df,
+    train2_df,
     x_col='Class Path',
     y_col='Class',
     target_size=img_size,
@@ -76,7 +76,7 @@ test_generator = test_datagen.flow_from_dataframe(
 )
 
 # -----------------------------------------------------
-# 2) Define a CNN Model
+# 2) Load the Resnet Model
 # -----------------------------------------------------
 base_model = ResNet50V2(
     include_top=False,
@@ -105,13 +105,13 @@ model = Sequential([
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
-    metrics=['accuracy']
+    metrics=['recall', 'accuracy']
 )
 
 model.summary()
 
 # -----------------------------------------------------
-# 3) Set Callbacks (Optional)
+# 3) Set Callbacks
 # -----------------------------------------------------
 # EarlyStopping: stop if validation loss does not improve for patience epochs
 # ReduceLROnPlateau: reduce the learning rate when validation loss stops improving
@@ -119,32 +119,38 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weig
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbose=1)
 
 # -----------------------------------------------------
-# 4) Train the Model
+# 4) Train the Model Frozen then Unfrozen
 # -----------------------------------------------------
-epochs = 10
+epochs = 5
 
-history = model.fit(
+history_frozen = model.fit(
     train_generator,
     validation_data=valid_generator,
     epochs=epochs,
     callbacks=[early_stopping, reduce_lr]
 )
 
+# unfreeze model and continue training at low LR
 base_model.trainable = True
-epochs = 20
+epochs = 5
 
 model.compile(
     optimizer=Adam(learning_rate=0.00001),
     loss='categorical_crossentropy',
-    metrics=['accuracy']
+    metrics=['recall', 'accuracy']
 )
 
-history2 = model.fit(
+history_unfreeze = model.fit(
     train_generator,
     validation_data=valid_generator,
     epochs=epochs,
     callbacks=[early_stopping, reduce_lr]
 )
+
+# Combine the histories
+history = {}
+for keys in history_frozen.history:
+  history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
 
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
@@ -157,27 +163,41 @@ print(f"Test Accuracy: {test_acc:.4f}")
 # 6) Plot Training Curves
 # -----------------------------------------------------
 plt.figure()
-plt.plot(history.history['accuracy'], label='train_accuracy')
-plt.plot(history.history['val_accuracy'], label='val_accuracy')
+plt.plot(history['accuracy'], label='train_accuracy')
+plt.plot(history['val_accuracy'], label='val_accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.title('Training vs Validation Accuracy')
 plt.legend()
-plt.show()
+os.makedirs('temp', exist_ok=True)
+plt.savefig(f'temp/accuracy_plot.png')
+plt.close()
 
 plt.figure()
-plt.plot(history.history['loss'], label='train_loss')
-plt.plot(history.history['val_loss'], label='val_loss')
+plt.plot(history['recall'], label='train_recall')
+plt.plot(history['val_accuracy'], label='val_recall')
+plt.xlabel('Epoch')
+plt.ylabel('Recall')
+plt.title('Training vs Validation Recall')
+plt.legend()
+os.makedirs('temp', exist_ok=True)
+plt.savefig(f'temp/accuracy_plot.png')
+plt.close()
+
+plt.figure()
+plt.plot(history['loss'], label='train_loss')
+plt.plot(history['val_loss'], label='val_loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training vs Validation Loss')
 plt.legend()
-plt.show()
+plt.savefig(f'temp/val_loss_plot.png')
+plt.close()
 
 # -----------------------------------------------------
 # 7) Generate Classification Report & Confusion Matrix
 # -----------------------------------------------------
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
 # Predict classes
 Y_pred = model.predict(test_generator)
@@ -193,5 +213,8 @@ print(classification_report(y_true, y_pred, target_names=labels))
 cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = model.classes_)
+disp.plot()
+plt.savefig(f'temp/cm_display.png')
 
-model.save('resmodel.keras')
+#model.save('resmodel.keras')
