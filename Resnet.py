@@ -11,6 +11,10 @@ from tensorflow.keras.optimizers import Adam
 import pandas as pd
 from tensorflow.keras.applications import ResNet50V2
 
+# Limit TensorFlow to use up to 8 threads
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
+
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
                                  for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
@@ -121,7 +125,7 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model Frozen then Unfrozen
 # -----------------------------------------------------
-epochs = 5
+epochs = 10
 
 history_frozen = model.fit(
     train_generator,
@@ -132,7 +136,7 @@ history_frozen = model.fit(
 
 # unfreeze model and continue training at low LR
 base_model.trainable = True
-epochs = 5
+epochs = 25
 
 model.compile(
     optimizer=Adam(learning_rate=0.00001),
@@ -150,14 +154,18 @@ history_unfreeze = model.fit(
 # Combine the histories
 history = {}
 for keys in history_frozen.history:
-  history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
+    print(history_frozen.history[keys])
+    print(history_unfreeze.history[keys])
+    history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
+    print(history[keys])
 
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
 # -----------------------------------------------------
-test_loss, test_acc = model.evaluate(test_generator)
-print(f"Test Loss: {test_loss:.4f}")
-print(f"Test Accuracy: {test_acc:.4f}")
+test_metrics = model.evaluate(test_generator, return_dict = True)
+print(f"Test Loss: {test_metrics['loss']:.4f}")
+print(f"Test Recall: {test_metrics['recall']:.4f}")
+print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
@@ -175,13 +183,13 @@ plt.close()
 
 plt.figure()
 plt.plot(history['recall'], label='train_recall')
-plt.plot(history['val_accuracy'], label='val_recall')
+plt.plot(history['val_recall'], label='val_recall')
 plt.xlabel('Epoch')
 plt.ylabel('Recall')
 plt.title('Training vs Validation Recall')
 plt.legend()
 os.makedirs('temp', exist_ok=True)
-plt.savefig(f'temp/accuracy_plot.png')
+plt.savefig(f'temp/recall_plot.png')
 plt.close()
 
 plt.figure()
@@ -213,8 +221,9 @@ print(classification_report(y_true, y_pred, target_names=labels))
 cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = model.classes_)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = list(train_generator.class_indices.keys()))
 disp.plot()
 plt.savefig(f'temp/cm_display.png')
 
-#model.save('resmodel.keras')
+# save the model for future use
+model.save('resmodel.keras')
