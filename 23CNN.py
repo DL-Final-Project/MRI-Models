@@ -10,6 +10,10 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 import pandas as pd
 
+# Limit TensorFlow to use up to 8 threads
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
+
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
                                  for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
@@ -54,6 +58,15 @@ train_generator = train_datagen.flow_from_dataframe(
     class_mode='categorical'
 )
 
+train2_generator = train_datagen.flow_from_dataframe(
+    train2_df,
+    x_col='Class Path',
+    y_col='Class',
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
 valid_generator = test_datagen.flow_from_dataframe(
     valid_df,
     x_col='Class Path',
@@ -79,7 +92,7 @@ test_generator = test_datagen.flow_from_dataframe(
 # -----------------------------------------------------
 model = Sequential([
     # Block 1
-    Conv2D(64, (22, 22), strides=2, input_shape=(512, 512, 1)),
+    Conv2D(64, (22, 22), strides=2, input_shape=(512, 512, 3)),
     MaxPooling2D(pool_size=(4, 4)),
     BatchNormalization(),
 
@@ -115,7 +128,7 @@ model = Sequential([
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
-    metrics=['accuracy']
+    metrics=['recall','accuracy']
 )
 
 model.summary()
@@ -131,21 +144,22 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 40
+epochs = 15
 
 history = model.fit(
-    train_generator,
+    train2_generator,
     validation_data=valid_generator,
     epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[reduce_lr]
 )
 
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
 # -----------------------------------------------------
-test_loss, test_acc = model.evaluate(test_generator)
-print(f"Test Loss: {test_loss:.4f}")
-print(f"Test Accuracy: {test_acc:.4f}")
+test_metrics = model.evaluate(test_generator, return_dict = True)
+print(f"Test Loss: {test_metrics['loss']:.4f}")
+print(f"Test Recall: {test_metrics['recall']:.4f}")
+print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
@@ -157,7 +171,20 @@ plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.title('Training vs Validation Accuracy')
 plt.legend()
-plt.show()
+os.makedirs('temp', exist_ok=True)
+os.makedirs('temp/23CNN', exist_ok=True)
+plt.savefig(f'temp/23CNN/23cnn_accuracy.png')
+plt.close()
+
+plt.figure()
+plt.plot(history.history['recall'], label='train_recall')
+plt.plot(history.history['val_recall'], label='val_recall')
+plt.xlabel('Epoch')
+plt.ylabel('Recall')
+plt.title('Training vs Validation Recall')
+plt.legend()
+plt.savefig(f'temp/23CNN/23cnn_recall.png')
+plt.close()
 
 plt.figure()
 plt.plot(history.history['loss'], label='train_loss')
@@ -166,12 +193,13 @@ plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training vs Validation Loss')
 plt.legend()
-plt.show()
+plt.savefig(f'temp/23CNN/23cnn_val_loss.png')
+plt.close()
 
 # -----------------------------------------------------
 # 7) Generate Classification Report & Confusion Matrix
 # -----------------------------------------------------
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
 # Predict classes
 Y_pred = model.predict(test_generator)
@@ -187,5 +215,9 @@ print(classification_report(y_true, y_pred, target_names=labels))
 cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
+
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
+disp.plot()
+plt.savefig(f'temp/23CNN/23cnn_cm_display.png')
 
 model.save('23CNN.keras')

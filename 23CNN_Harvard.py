@@ -9,11 +9,10 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropou
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 import pandas as pd
-from tensorflow.keras.applications import ResNet50V2
 
 # Limit TensorFlow to use up to 8 threads
-#tf.config.threading.set_intra_op_parallelism_threads(8)
-#tf.config.threading.set_inter_op_parallelism_threads(4)
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
 
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
@@ -24,9 +23,9 @@ def create_df(image_path):
     return image_df
 
 # Set the directories in the project
-train_df = create_df("Training")
-test_df = create_df("Testing")
+harvard_df = create_df("HarvardDataset")
 
+train_df, test_df = train_test_split(harvard_df, random_state=42, stratify=harvard_df['Class'])
 train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
@@ -34,35 +33,23 @@ train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train
 # -----------------------------------------------------
 # Use data augmentation on the training set to help the model generalize
 train_datagen = ImageDataGenerator(
-    rescale=1. / 255,
-    rotation_range=15,
+    rescale=1 / 255,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
     width_shift_range=0.1,
     height_shift_range=0.1,
-    zoom_range=0.1,
-    horizontal_flip=True,
-    fill_mode='nearest'
-)
+    vertical_flip=True,
+    validation_split=0.2)
 
-# For eval data, just rescale
-eval_datagen = ImageDataGenerator(rescale=1. / 255)
+# For test data, just rescale
+test_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
-batch_size = 32
-img_size = (224, 224)
+batch_size = 10
+img_size = (512, 512)
 
-# Larger training split used for evaluating train set metrics, no augmentations
-train_eval = eval_datagen.flow_from_dataframe(
-    train_df,
-    x_col='Class Path',
-    y_col='Class',
-    target_size=img_size,
-    batch_size=batch_size,
-    class_mode='categorical',
-    shuffle=False  # important so predictions and labels align
-)
-
-# Smaller training set split used for model training, augmented
-train2_generator = train_datagen.flow_from_dataframe(
+train_generator = train_datagen.flow_from_dataframe(
     train2_df,
     x_col='Class Path',
     y_col='Class',
@@ -71,8 +58,7 @@ train2_generator = train_datagen.flow_from_dataframe(
     class_mode='categorical'
 )
 
-# validation set, no augmentation
-valid_generator = eval_datagen.flow_from_dataframe(
+valid_generator = test_datagen.flow_from_dataframe(
     valid_df,
     x_col='Class Path',
     y_col='Class',
@@ -82,8 +68,7 @@ valid_generator = eval_datagen.flow_from_dataframe(
     shuffle=False  # important so predictions and labels align
 )
 
-# test set, no augmentation
-test_generator = eval_datagen.flow_from_dataframe(
+test_generator = test_datagen.flow_from_dataframe(
     test_df,
     x_col='Class Path',
     y_col='Class',
@@ -94,18 +79,29 @@ test_generator = eval_datagen.flow_from_dataframe(
 )
 
 # -----------------------------------------------------
-# 2) Load the Resnet Model
+# 2) Define a CNN Model
 # -----------------------------------------------------
-base_model = ResNet50V2(
-    include_top=False,
-    weights='imagenet',
-    input_shape=(224,224,3))
-
-base_model.trainable = False
-
 model = Sequential([
     # Block 1
-    base_model,
+    Conv2D(64, (22, 22), strides=2, input_shape=(512, 512, 3)),
+    MaxPooling2D(pool_size=(4, 4)),
+    BatchNormalization(),
+
+
+    # Block 2
+    Conv2D(128, (11, 11), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
+    BatchNormalization(),
+
+    # Block 3
+    Conv2D(256, (7, 7), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
+    BatchNormalization(),
+
+    # Block 4
+    Conv2D(512, (3, 3), strides=2, padding='same'),
+    MaxPooling2D(pool_size=(2, 2)),
+    BatchNormalization(),
 
     GlobalAveragePooling2D(),
     Activation("relu"),
@@ -117,19 +113,19 @@ model = Sequential([
     Dense(256, activation='relu'),
     BatchNormalization(),
     Dropout(0.2),
-    Dense(4, activation='softmax')  # 4 classes: glioma, meningioma, pituitary, no_tumor
+    Dense(2, activation='softmax')  # 2 classes: normal, abnormal
 ])
 
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
-    metrics=['recall', 'accuracy']
+    metrics=['recall','accuracy']
 )
 
 model.summary()
 
 # -----------------------------------------------------
-# 3) Set Callbacks
+# 3) Set Callbacks (Optional)
 # -----------------------------------------------------
 # EarlyStopping: stop if validation loss does not improve for patience epochs
 # ReduceLROnPlateau: reduce the learning rate when validation loss stops improving
@@ -137,85 +133,61 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weig
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbose=1)
 
 # -----------------------------------------------------
-# 4) Train the Model Frozen then Unfrozen
+# 4) Train the Model
 # -----------------------------------------------------
-epochs = 1
+epochs = 40
 
-history_frozen = model.fit(
-    train2_generator,
+history = model.fit(
+    train_generator,
     validation_data=valid_generator,
     epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[reduce_lr]
 )
-
-# unfreeze model and continue training at low LR
-base_model.trainable = True
-epochs = 1
-
-model.compile(
-    optimizer=Adam(learning_rate=0.00001),
-    loss='categorical_crossentropy',
-    metrics=['recall', 'accuracy']
-)
-
-history_unfreeze = model.fit(
-    train2_generator,
-    validation_data=valid_generator,
-    epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
-)
-
-# Combine the histories
-history = {}
-for keys in history_frozen.history:
-    history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
 
 # -----------------------------------------------------
-# 5) Evaluate on Test and Train Set
+# 5) Evaluate on Test Set
 # -----------------------------------------------------
 test_metrics = model.evaluate(test_generator, return_dict = True)
 print(f"Test Loss: {test_metrics['loss']:.4f}")
 print(f"Test Recall: {test_metrics['recall']:.4f}")
-print(f"Test Accuracy: {test_metrics['accuracy']:.4f}\n")
-
-train_metrics = model.evaluate(train_eval, return_dict = True)
-print(f"Train Loss: {train_metrics['loss']:.4f}")
-print(f"Train Recall: {train_metrics['recall']:.4f}")
-print(f"Train Accuracy: {train_metrics['accuracy']:.4f}\n")
+print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
 # -----------------------------------------------------
 plt.figure()
-plt.plot(history['accuracy'], label='train_accuracy')
-plt.plot(history['val_accuracy'], label='val_accuracy')
+plt.plot(history.history['accuracy'], label='train_accuracy')
+plt.plot(history.history['val_accuracy'], label='val_accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
+plt.ylim(0, 1)
 plt.title('Training vs Validation Accuracy')
 plt.legend()
 os.makedirs('temp', exist_ok=True)
-os.makedirs('temp/resnet', exist_ok=True)
-plt.savefig(f'temp/resnet/res_accuracy.png')
+os.makedirs('temp/harvard', exist_ok=True)
+os.makedirs('temp/harvard/23CNN', exist_ok=True)
+plt.savefig(f'temp/harvard/23CNN/23cnn_accuracy.png')
 plt.close()
 
 plt.figure()
-plt.plot(history['recall'], label='train_recall')
-plt.plot(history['val_recall'], label='val_recall')
+plt.plot(history.history['recall'], label='train_recall')
+plt.plot(history.history['val_recall'], label='val_recall')
 plt.xlabel('Epoch')
 plt.ylabel('Recall')
+plt.ylim(0, 1)
 plt.title('Training vs Validation Recall')
 plt.legend()
-plt.savefig(f'temp/resnet/res_recall.png')
+plt.savefig(f'temp/harvard/23CNN/23cnn_recall.png')
 plt.close()
 
 plt.figure()
-plt.plot(history['loss'], label='train_loss')
-plt.plot(history['val_loss'], label='val_loss')
+plt.plot(history.history['loss'], label='train_loss')
+plt.plot(history.history['val_loss'], label='val_loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training vs Validation Loss')
 plt.legend()
-plt.savefig(f'temp/resnet/res_val_loss.png')
+plt.savefig(f'temp/harvard/23CNN/23cnn_val_loss.png')
 plt.close()
 
 # -----------------------------------------------------
@@ -223,30 +195,22 @@ plt.close()
 # -----------------------------------------------------
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
-labels = list(train2_generator.class_indices.keys())
-
-# Predict classes test set
-Y_pred_test = model.predict(test_generator)
-y_pred_test = np.argmax(Y_pred_test, axis=1)
-y_true_test = test_generator.classes
-
-Y_pred_train = model.predict(train_eval)
-y_pred_train = np.argmax(Y_pred_train, axis=1)
-y_true_train = train_eval.classes
+# Predict classes
+Y_pred = model.predict(test_generator)
+y_pred = np.argmax(Y_pred, axis=1)
+y_true = test_generator.classes
 
 # Print classification report
-print("Classification Report (Test Set):")
-print(classification_report(y_true_test, y_pred_test, target_names=labels))
-print("Classification Report (Train Set):")
-print(classification_report(y_true_train, y_pred_train, target_names=labels))
+labels = list(train_generator.class_indices.keys())
+print("Classification Report:")
+print(classification_report(y_true, y_pred, target_names=labels))
 
 # Confusion matrix
-cm = confusion_matrix(y_true_test, y_pred_test)
+cm = confusion_matrix(y_true, y_pred)
 print("Confusion Matrix:")
 print(cm)
+
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
 disp.plot()
-plt.savefig(f'temp/resnet/test_res_cm_display.png')
+plt.savefig(f'temp/harvard/23CNN/23cnn_cm_display.png')
 
-# save the model for future use
-model.save('resmodel.keras')
