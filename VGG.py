@@ -11,6 +11,11 @@ from tensorflow.keras.optimizers import Adam
 import pandas as pd
 from tensorflow.keras.applications import VGG16
 
+# Limit TensorFlow to use up to 8 threads
+#tf.config.threading.set_intra_op_parallelism_threads(8)
+#tf.config.threading.set_inter_op_parallelism_threads(4)
+plt.switch_backend('agg')
+
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
                                  for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
@@ -23,7 +28,7 @@ def create_df(image_path):
 train_df = create_df("Training")
 test_df = create_df("Testing")
 
-train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
+train2_df, valid_df = train_test_split(train_df, train_size=0.8, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -40,14 +45,26 @@ train_datagen = ImageDataGenerator(
 )
 
 # For test data, just rescale
-test_datagen = ImageDataGenerator(rescale=1. / 255)
+eval_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
 batch_size = 32
 img_size = (224, 224)
 
-train_generator = train_datagen.flow_from_dataframe(
+# Larger training split used for evaluating train set metrics, no augmentations
+train_eval = eval_datagen.flow_from_dataframe(
     train_df,
+    x_col='Class Path',
+    y_col='Class',
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False  # important so predictions and labels align
+)
+
+# Smaller training set split used for model training, augmented
+train2_generator = train_datagen.flow_from_dataframe(
+    train2_df,
     x_col='Class Path',
     y_col='Class',
     target_size=img_size,
@@ -55,7 +72,8 @@ train_generator = train_datagen.flow_from_dataframe(
     class_mode='categorical'
 )
 
-valid_generator = test_datagen.flow_from_dataframe(
+# validation set, no augmentation
+valid_generator = eval_datagen.flow_from_dataframe(
     valid_df,
     x_col='Class Path',
     y_col='Class',
@@ -65,7 +83,8 @@ valid_generator = test_datagen.flow_from_dataframe(
     shuffle=False  # important so predictions and labels align
 )
 
-test_generator = test_datagen.flow_from_dataframe(
+# test set, no augmentation
+test_generator = eval_datagen.flow_from_dataframe(
     test_df,
     x_col='Class Path',
     y_col='Class',
@@ -105,7 +124,7 @@ model = Sequential([
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
-    metrics=['accuracy']
+    metrics=['recall','accuracy']
 )
 
 model.summary()
@@ -121,77 +140,127 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
+# -----------------------------------------------------
+# 4) Train the Model Frozen then Unfrozen
+# -----------------------------------------------------
 epochs = 10
 
-history = model.fit(
-    train_generator,
+history_frozen = model.fit(
+    train2_generator,
     validation_data=valid_generator,
     epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[reduce_lr]
 )
 
+# unfreeze model and continue training at low LR
 base_model.trainable = True
-epochs = 20
+epochs = 30
 
 model.compile(
     optimizer=Adam(learning_rate=0.00001),
     loss='categorical_crossentropy',
-    metrics=['accuracy']
+    metrics=['recall', 'accuracy']
 )
 
-history2 = model.fit(
-    train_generator,
+history_unfreeze = model.fit(
+    train2_generator,
     validation_data=valid_generator,
     epochs=epochs,
     callbacks=[early_stopping, reduce_lr]
 )
 
+# Combine the histories
+history = {}
+for keys in history_frozen.history:
+    history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
+
+# save the model for future use
+#model.save('vgg16model.keras')
+
 # -----------------------------------------------------
-# 5) Evaluate on Test Set
+# 5) Evaluate on Test and Train Set
 # -----------------------------------------------------
-test_loss, test_acc = model.evaluate(test_generator)
-print(f"Test Loss: {test_loss:.4f}")
-print(f"Test Accuracy: {test_acc:.4f}")
+test_metrics = model.evaluate(test_generator, return_dict = True)
+print(f"Test Loss: {test_metrics['loss']:.4f}")
+print(f"Test Recall: {test_metrics['recall']:.4f}")
+print(f"Test Accuracy: {test_metrics['accuracy']:.4f}\n")
+
+train_metrics = model.evaluate(train_eval, return_dict = True)
+print(f"Train Loss: {train_metrics['loss']:.4f}")
+print(f"Train Recall: {train_metrics['recall']:.4f}")
+print(f"Train Accuracy: {train_metrics['accuracy']:.4f}\n")
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
 # -----------------------------------------------------
 plt.figure()
-plt.plot(history.history['accuracy'], label='train_accuracy')
-plt.plot(history.history['val_accuracy'], label='val_accuracy')
+plt.plot(history['accuracy'], label='train_accuracy')
+plt.plot(history['val_accuracy'], label='val_accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.title('Training vs Validation Accuracy')
 plt.legend()
-plt.show()
+os.makedirs('temp', exist_ok=True)
+os.makedirs('temp/vgg16', exist_ok=True)
+plt.savefig(f'temp/vgg16/vgg16_accuracy.png')
+plt.close()
 
 plt.figure()
-plt.plot(history.history['loss'], label='train_loss')
-plt.plot(history.history['val_loss'], label='val_loss')
+plt.plot(history['recall'], label='train_recall')
+plt.plot(history['val_recall'], label='val_recall')
+plt.xlabel('Epoch')
+plt.ylabel('Recall')
+plt.title('Training vs Validation Recall')
+plt.legend()
+plt.savefig(f'temp/vgg16/vgg16_recall.png')
+plt.close()
+
+plt.figure()
+plt.plot(history['loss'], label='train_loss')
+plt.plot(history['val_loss'], label='val_loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training vs Validation Loss')
 plt.legend()
-plt.show()
+plt.savefig(f'temp/vgg16/vgg16_val_loss.png')
+plt.close()
 
 # -----------------------------------------------------
 # 7) Generate Classification Report & Confusion Matrix
 # -----------------------------------------------------
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
-# Predict classes
-Y_pred = model.predict(test_generator)
-y_pred = np.argmax(Y_pred, axis=1)
-y_true = test_generator.classes
+labels = list(train2_generator.class_indices.keys())
+
+# Predict classes test set
+Y_pred_test = model.predict(test_generator)
+y_pred_test = np.argmax(Y_pred_test, axis=1)
+y_true_test = test_generator.classes
+
+Y_pred_train = model.predict(train_eval)
+y_pred_train = np.argmax(Y_pred_train, axis=1)
+y_true_train = train_eval.classes
 
 # Print classification report
-labels = list(train_generator.class_indices.keys())
-print("Classification Report:")
-print(classification_report(y_true, y_pred, target_names=labels))
+print("Classification Report (Test Set):")
+print(classification_report(y_true_test, y_pred_test, target_names=labels))
+print("Classification Report (Train Set):")
+print(classification_report(y_true_train, y_pred_train, target_names=labels))
 
 # Confusion matrix
-cm = confusion_matrix(y_true, y_pred)
-print("Confusion Matrix:")
-print(cm)
+cm_test = confusion_matrix(y_true_test, y_pred_test)
+print("Confusion Matrix (Test Set):")
+print(cm_test)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_test, display_labels = labels)
+disp.plot()
+plt.savefig(f'temp/vgg16/test_vgg16_cm_display.png')
 
-model.save('vgg16model.keras')
+# Confusion matrix
+cm_train = confusion_matrix(y_true_train, y_pred_train)
+print("Confusion Matrix (Train set):")
+print(cm_train)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_train, display_labels = labels)
+disp.plot()
+plt.savefig(f'temp/vgg16/train_vgg16_cm_display.png')
+
+

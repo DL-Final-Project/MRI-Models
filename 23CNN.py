@@ -13,6 +13,7 @@ import pandas as pd
 # Limit TensorFlow to use up to 8 threads
 tf.config.threading.set_intra_op_parallelism_threads(8)
 tf.config.threading.set_inter_op_parallelism_threads(4)
+plt.switch_backend('agg')   # resolves a pyplot bug
 
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
@@ -26,7 +27,7 @@ def create_df(image_path):
 train_df = create_df("Training")
 test_df = create_df("Testing")
 
-train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
+train2_df, valid_df = train_test_split(train_df, train_size=0.8, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -43,13 +44,13 @@ train_datagen = ImageDataGenerator(
 )
 
 # For test data, just rescale
-test_datagen = ImageDataGenerator(rescale=1. / 255)
+eval_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
 batch_size = 32
 img_size = (512, 512)
 
-train_generator = train_datagen.flow_from_dataframe(
+train_eval = eval_datagen.flow_from_dataframe(
     train_df,
     x_col='Class Path',
     y_col='Class',
@@ -67,7 +68,7 @@ train2_generator = train_datagen.flow_from_dataframe(
     class_mode='categorical'
 )
 
-valid_generator = test_datagen.flow_from_dataframe(
+valid_generator = eval_datagen.flow_from_dataframe(
     valid_df,
     x_col='Class Path',
     y_col='Class',
@@ -77,7 +78,7 @@ valid_generator = test_datagen.flow_from_dataframe(
     shuffle=False  # important so predictions and labels align
 )
 
-test_generator = test_datagen.flow_from_dataframe(
+test_generator = eval_datagen.flow_from_dataframe(
     test_df,
     x_col='Class Path',
     y_col='Class',
@@ -126,7 +127,7 @@ model = Sequential([
 ])
 
 model.compile(
-    optimizer=Adam(learning_rate=0.0001),
+    optimizer=Adam(learning_rate=1e-4),
     loss='categorical_crossentropy',
     metrics=['recall','accuracy']
 )
@@ -144,7 +145,7 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 15
+epochs = 40
 
 history = model.fit(
     train2_generator,
@@ -159,7 +160,12 @@ history = model.fit(
 test_metrics = model.evaluate(test_generator, return_dict = True)
 print(f"Test Loss: {test_metrics['loss']:.4f}")
 print(f"Test Recall: {test_metrics['recall']:.4f}")
-print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
+print(f"Test Accuracy: {test_metrics['accuracy']:.4f}\n")
+
+train_metrics = model.evaluate(train_eval, return_dict = True)
+print(f"Train Loss: {train_metrics['loss']:.4f}")
+print(f"Train Recall: {train_metrics['recall']:.4f}")
+print(f"Train Accuracy: {train_metrics['accuracy']:.4f}\n")
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
@@ -169,7 +175,7 @@ plt.plot(history.history['accuracy'], label='train_accuracy')
 plt.plot(history.history['val_accuracy'], label='val_accuracy')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
-plt.title('Training vs Validation Accuracy')
+plt.title('Training vs Validation Accuracy (23CNN)')
 plt.legend()
 os.makedirs('temp', exist_ok=True)
 os.makedirs('temp/23CNN', exist_ok=True)
@@ -181,7 +187,7 @@ plt.plot(history.history['recall'], label='train_recall')
 plt.plot(history.history['val_recall'], label='val_recall')
 plt.xlabel('Epoch')
 plt.ylabel('Recall')
-plt.title('Training vs Validation Recall')
+plt.title('Training vs Validation Recall (23CNN)')
 plt.legend()
 plt.savefig(f'temp/23CNN/23cnn_recall.png')
 plt.close()
@@ -191,7 +197,7 @@ plt.plot(history.history['loss'], label='train_loss')
 plt.plot(history.history['val_loss'], label='val_loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
-plt.title('Training vs Validation Loss')
+plt.title('Training vs Validation Loss (23CNN)')
 plt.legend()
 plt.savefig(f'temp/23CNN/23cnn_val_loss.png')
 plt.close()
@@ -201,23 +207,37 @@ plt.close()
 # -----------------------------------------------------
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
-# Predict classes
-Y_pred = model.predict(test_generator)
-y_pred = np.argmax(Y_pred, axis=1)
-y_true = test_generator.classes
+labels = list(train2_generator.class_indices.keys())
+
+# Predict classes test set
+Y_pred_test = model.predict(test_generator)
+y_pred_test = np.argmax(Y_pred_test, axis=1)
+y_true_test = test_generator.classes
+
+Y_pred_train = model.predict(train_eval)
+y_pred_train = np.argmax(Y_pred_train, axis=1)
+y_true_train = train_eval.classes
 
 # Print classification report
-labels = list(train_generator.class_indices.keys())
-print("Classification Report:")
-print(classification_report(y_true, y_pred, target_names=labels))
+print("Classification Report (Test Set):")
+print(classification_report(y_true_test, y_pred_test, target_names=labels))
+print("Classification Report (Train Set):")
+print(classification_report(y_true_train, y_pred_train, target_names=labels))
 
 # Confusion matrix
-cm = confusion_matrix(y_true, y_pred)
-print("Confusion Matrix:")
-print(cm)
-
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
+cm_test = confusion_matrix(y_true_test, y_pred_test)
+print("Confusion Matrix 23CNN (Test Set):")
+print(cm_test)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_test, display_labels = labels)
 disp.plot()
-plt.savefig(f'temp/23CNN/23cnn_cm_display.png')
+plt.savefig(f'temp/23CNN/test_23cnn_cm_display.png')
+
+# Confusion matrix
+cm_train = confusion_matrix(y_true_train, y_pred_train)
+print("Confusion Matrix 23CNN (Train set):")
+print(cm_train)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_train, display_labels = labels)
+disp.plot()
+plt.savefig(f'temp/23CNN/train_23cnn_cm_display.png')
 
 model.save('23CNN.keras')

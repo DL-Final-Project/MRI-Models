@@ -12,8 +12,9 @@ import pandas as pd
 from tensorflow.keras.applications import ResNet50V2
 
 # Limit TensorFlow to use up to 8 threads
-#tf.config.threading.set_intra_op_parallelism_threads(8)
-#tf.config.threading.set_inter_op_parallelism_threads(4)
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
+plt.switch_backend('agg')
 
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
@@ -27,7 +28,7 @@ def create_df(image_path):
 train_df = create_df("Training")
 test_df = create_df("Testing")
 
-train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
+train2_df, valid_df = train_test_split(train_df, train_size=0.8, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -139,18 +140,18 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model Frozen then Unfrozen
 # -----------------------------------------------------
-epochs = 1
+epochs = 10
 
 history_frozen = model.fit(
     train2_generator,
     validation_data=valid_generator,
     epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[reduce_lr]
 )
 
 # unfreeze model and continue training at low LR
 base_model.trainable = True
-epochs = 1
+epochs = 30
 
 model.compile(
     optimizer=Adam(learning_rate=0.00001),
@@ -241,12 +242,20 @@ print("Classification Report (Train Set):")
 print(classification_report(y_true_train, y_pred_train, target_names=labels))
 
 # Confusion matrix
-cm = confusion_matrix(y_true_test, y_pred_test)
-print("Confusion Matrix:")
-print(cm)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
+cm_test = confusion_matrix(y_true_test, y_pred_test)
+print("Confusion Matrix (Test Set):")
+print(cm_test)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_test, display_labels = labels)
 disp.plot()
 plt.savefig(f'temp/resnet/test_res_cm_display.png')
+
+# Confusion matrix
+cm_train = confusion_matrix(y_true_train, y_pred_train)
+print("Confusion Matrix (Train set):")
+print(cm_train)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm_train, display_labels = labels)
+disp.plot()
+plt.savefig(f'temp/resnet/train_res_cm_display.png')
 
 # save the model for future use
 model.save('resmodel.keras')

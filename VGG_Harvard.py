@@ -11,6 +11,9 @@ from tensorflow.keras.optimizers import Adam
 import pandas as pd
 from tensorflow.keras.applications import VGG16
 
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
+
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
                                  for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
@@ -23,7 +26,7 @@ def create_df(image_path):
 harvard_df = create_df("HarvardDataset")
 
 
-train_df, test_df = train_test_split(harvard_df, random_state=42, stratify=harvard_df['Class'])
+train_df, test_df = train_test_split(harvard_df, train_size=0.80, random_state=42, stratify=harvard_df['Class'])
 train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
@@ -37,8 +40,7 @@ train_datagen = ImageDataGenerator(
     horizontal_flip=True,
     width_shift_range=0.1,
     height_shift_range=0.1,
-    vertical_flip=True,
-    validation_split=0.2)
+    vertical_flip=True)
 
 # For test data, just rescale
 test_datagen = ImageDataGenerator(rescale=1. / 255)
@@ -104,7 +106,7 @@ model = Sequential([
 ])
 
 model.compile(
-    optimizer=Adam(learning_rate=0.0001),
+    optimizer=Adam(learning_rate=1e-4),
     loss='categorical_crossentropy',
     metrics=['recall','accuracy']
 )
