@@ -111,7 +111,7 @@ reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbos
 # -----------------------------------------------------
 # 4) Train the Model
 # -----------------------------------------------------
-epochs = 40
+epochs = 25
 
 history = model.fit(
     train_generator,
@@ -123,9 +123,10 @@ history = model.fit(
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
 # -----------------------------------------------------
-test_loss, test_acc = model.evaluate(test_generator)
+test_loss, test_acc, test_recall = model.evaluate(test_generator)
 print(f"Test Loss: {test_loss:.4f}")
 print(f"Test Accuracy: {test_acc:.4f}")
+print(f"Test Recall: {test_recall:.4f}")
 
 # Predict classes
 Y_pred = model.predict(test_generator)
