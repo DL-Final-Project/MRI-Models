@@ -11,8 +11,8 @@ from tensorflow.keras.optimizers import Adam
 import pandas as pd
 from tensorflow.keras.applications import VGG16
 
-tf.config.threading.set_intra_op_parallelism_threads(8)
-tf.config.threading.set_inter_op_parallelism_threads(4)
+#tf.config.threading.set_intra_op_parallelism_threads(8)
+#tf.config.threading.set_inter_op_parallelism_threads(4)
 
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
@@ -26,8 +26,8 @@ def create_df(image_path):
 harvard_df = create_df("HarvardDataset")
 
 
-train_df, test_df = train_test_split(harvard_df, train_size=0.80, random_state=42, stratify=harvard_df['Class'])
-train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
+train_df, test_df = train_test_split(harvard_df, test_size=0.2, random_state=42, stratify=harvard_df['Class'], random_state=42) # 19.5% to match 30 in test set of original paper
+train2_df, valid_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -89,20 +89,13 @@ base_model = VGG16(
 base_model.trainable = False
 
 model = Sequential([
-    # Block 1
-    base_model,
-
+    base_model, # VGG16
     GlobalAveragePooling2D(),
-    Activation("relu"),
-
     Dense(1024, activation='relu'),
-    BatchNormalization(),
+    Dense(1024, activation='relu'),
     Dense(512, activation='relu'),
-    BatchNormalization(),
-    Dense(256, activation='relu'),
-    BatchNormalization(),
     Dropout(0.2),
-    Dense(2, activation='softmax')  # 4 classes: glioma, meningioma, pituitary, no_tumor
+    Dense(2, activation='softmax')  # 2 classes: Normal, Abnormal
 ])
 
 model.compile(
@@ -129,17 +122,18 @@ epochs = 40
 history = model.fit(
     train_generator,
     validation_data=valid_generator,
-    epochs=epochs,
-    callbacks=[reduce_lr]
+    epochs=epochs
 )
 
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
 # -----------------------------------------------------
+'''
 test_metrics = model.evaluate(test_generator, return_dict = True)
 print(f"Test Loss: {test_metrics['loss']:.4f}")
 print(f"Test Recall: {test_metrics['recall']:.4f}")
 print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
+'''
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
@@ -155,7 +149,7 @@ plt.legend()
 os.makedirs('temp', exist_ok=True)
 os.makedirs('temp/harvard', exist_ok=True)
 os.makedirs('temp/harvard/VGG16', exist_ok=True)
-plt.savefig(f'temp/harvard/VGG16/VGG16_accuracy.png')
+#plt.savefig(f'temp/harvard/VGG16/VGG16_accuracy.png')
 plt.close()
 
 plt.figure()
@@ -166,7 +160,7 @@ plt.ylabel('Recall')
 plt.ylim(0, 1)
 plt.title('Training vs Validation Recall')
 plt.legend()
-plt.savefig(f'temp/harvard/VGG16/VGG16_recall.png')
+#plt.savefig(f'temp/harvard/VGG16/VGG16_recall.png')
 plt.close()
 
 plt.figure()
@@ -176,7 +170,7 @@ plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training vs Validation Loss')
 plt.legend()
-plt.savefig(f'temp/harvard/VGG16/VGG16_val_loss.png')
+#plt.savefig(f'temp/harvard/VGG16/VGG16_val_loss.png')
 plt.close()
 
 # -----------------------------------------------------
@@ -201,5 +195,6 @@ print(cm)
 
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
 disp.plot()
-plt.savefig(f'temp/harvard/VGG16/VGG16_cm_display.png')
+#plt.savefig(f'temp/harvard/VGG16/VGG16_cm_display.png')
 
+model.save('VGG16_Harvard.keras')
