@@ -26,7 +26,7 @@ def create_df(image_path):
 harvard_df = create_df("HarvardDataset")
 
 
-train_df, test_df = train_test_split(harvard_df, test_size=0.2, random_state=42, stratify=harvard_df['Class'], random_state=42) # 19.5% to match 30 in test set of original paper
+train_df, test_df = train_test_split(harvard_df, test_size=0.195, random_state=42, stratify=harvard_df['Class']) # 19.5% to match 30 in test set of original paper
 train2_df, valid_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
@@ -128,12 +128,12 @@ history = model.fit(
 # -----------------------------------------------------
 # 5) Evaluate on Test Set
 # -----------------------------------------------------
-'''
+
 test_metrics = model.evaluate(test_generator, return_dict = True)
 print(f"Test Loss: {test_metrics['loss']:.4f}")
 print(f"Test Recall: {test_metrics['recall']:.4f}")
 print(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
-'''
+
 
 # -----------------------------------------------------
 # 6) Plot Training Curves
