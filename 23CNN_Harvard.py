@@ -25,8 +25,8 @@ def create_df(image_path):
 # Set the directories in the project
 harvard_df = create_df("HarvardDataset")
 
-train_df, test_df = train_test_split(harvard_df, random_state=42, stratify=harvard_df['Class'])
-train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train_df['Class'])
+train_df, test_df = train_test_split(harvard_df, test_size=0.195, random_state=42, stratify=harvard_df['Class']) # 19.5% to match 30 in test set of original paper
+train2_df, valid_df = train_test_split(train_df, test_size = 0.2, random_state=42, stratify=train_df['Class'])
 
 # -----------------------------------------------------
 # 1) Set Up Image Generators
@@ -39,8 +39,7 @@ train_datagen = ImageDataGenerator(
     horizontal_flip=True,
     width_shift_range=0.1,
     height_shift_range=0.1,
-    vertical_flip=True,
-    validation_split=0.2)
+    vertical_flip=True)
 
 # For test data, just rescale
 test_datagen = ImageDataGenerator(rescale=1. / 255)
@@ -117,7 +116,7 @@ model = Sequential([
 ])
 
 model.compile(
-    optimizer=Adam(learning_rate=0.0001),
+    optimizer=Adam(),
     loss='categorical_crossentropy',
     metrics=['recall','accuracy']
 )
@@ -140,8 +139,7 @@ epochs = 40
 history = model.fit(
     train_generator,
     validation_data=valid_generator,
-    epochs=epochs,
-    callbacks=[reduce_lr]
+    epochs=epochs
 )
 
 # -----------------------------------------------------
@@ -214,3 +212,4 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
 disp.plot()
 plt.savefig(f'temp/harvard/23CNN/23cnn_cm_display.png')
 
+model.save('23CNN_Harvard.keras')

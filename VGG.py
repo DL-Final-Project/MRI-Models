@@ -12,8 +12,8 @@ import pandas as pd
 from tensorflow.keras.applications import VGG16
 
 # Limit TensorFlow to use up to 8 threads
-#tf.config.threading.set_intra_op_parallelism_threads(8)
-#tf.config.threading.set_inter_op_parallelism_threads(4)
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(4)
 plt.switch_backend('agg')
 
 def create_df(image_path):
@@ -112,11 +112,11 @@ model = Sequential([
     Activation("relu"),
 
     Dense(1024, activation='relu'),
-    BatchNormalization(),
+    #BatchNormalization(),
+    Dense(1024, activation='relu'),
+    #BatchNormalization(),
     Dense(512, activation='relu'),
-    BatchNormalization(),
-    Dense(256, activation='relu'),
-    BatchNormalization(),
+    #BatchNormalization(),
     Dropout(0.2),
     Dense(4, activation='softmax')  # 4 classes: glioma, meningioma, pituitary, no_tumor
 ])
@@ -137,9 +137,6 @@ model.summary()
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbose=1)
 
-# -----------------------------------------------------
-# 4) Train the Model
-# -----------------------------------------------------
 # -----------------------------------------------------
 # 4) Train the Model Frozen then Unfrozen
 # -----------------------------------------------------
@@ -166,7 +163,7 @@ history_unfreeze = model.fit(
     train2_generator,
     validation_data=valid_generator,
     epochs=epochs,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[reduce_lr]
 )
 
 # Combine the histories
@@ -175,7 +172,7 @@ for keys in history_frozen.history:
     history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
 
 # save the model for future use
-#model.save('vgg16model.keras')
+model.save('vgg16model.keras')
 
 # -----------------------------------------------------
 # 5) Evaluate on Test and Train Set
