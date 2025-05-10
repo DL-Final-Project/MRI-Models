@@ -86,7 +86,7 @@ test_generator = eval_datagen.flow_from_dataframe(
 
 
 # Load a CNN Model
-model = tf.keras.models.load_model('23CNN.keras')
+model = tf.keras.models.load_model('models/23CNN.keras')
 
 
 # Evaluate on Test/Train Set

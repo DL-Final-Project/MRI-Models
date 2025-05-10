@@ -8,7 +8,10 @@ from keras.optimizers import Adam
 from sklearn.metrics import classification_report, confusion_matrix, recall_score, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import os
+import pandas as pd
+from sklearn.model_selection import train_test_split
 
+# handles possible mem issues for GPU
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
@@ -18,51 +21,87 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
-#paths and parameters
-train_dir = "Training"
-test_dir = "Testing"
+'''
+create_df - take a directory and return a dataframe with data and labels
+
+parameters  image path  the directory of images to parse
+returns     image_df    dataframe with data and labels
+
+'''
+def create_df(image_path):
+    classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
+                                 for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
+                                 for image in os.listdir(os.path.join(image_path, label))])
+
+    image_df = pd.DataFrame({'Class Path': class_paths, 'Class': classes})
+    return image_df
+
+# Set the directories in the project
+train_df = create_df("Training")
+test_df = create_df("Testing")
+
+train2_df, valid_df = train_test_split(train_df, train_size=0.8, random_state=42, stratify=train_df['Class'])
+
+
+# Use data augmentation on the training set to help the model generalize
+train_datagen = ImageDataGenerator(
+    rescale=1. / 255,
+    rotation_range=15,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    zoom_range=0.1,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+# For test data, just rescale
+eval_datagen = ImageDataGenerator(rescale=1. / 255)
+
+# Create iterators
+batch_size = 32
 img_size = (224, 224)
-batch_size = 8
 num_classes = 4
 
-#data gen
-train_datagen = ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=15, #make some small changes to images
-    width_shift_range=0.1, #make some small changes to images
-    height_shift_range=0.1, #make some small changes to images
-    zoom_range=0.1, #make some small changes to images
-    horizontal_flip=True, #make some small changes to images
-    fill_mode='nearest',
-    validation_split=0.2 #add validation (required for project)
+# evaluation generator for train
+train_generator_for_pred = eval_datagen.flow_from_dataframe(
+    train_df,
+    x_col='Class Path',
+    y_col='Class',
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical'
 )
 
-train_generator = train_datagen.flow_from_directory(
-    train_dir,
+# training set using data augmentation
+train2_generator = train_datagen.flow_from_dataframe(
+    train2_df,
+    x_col='Class Path',
+    y_col='Class',
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+# evaluation generator for validation
+valid_generator = eval_datagen.flow_from_dataframe(
+    valid_df,
+    x_col='Class Path',
+    y_col='Class',
     target_size=img_size,
     batch_size=batch_size,
     class_mode='categorical',
-    subset='training',
-    shuffle=True
+    shuffle=False  # important so predictions and labels align
 )
 
-val_generator = train_datagen.flow_from_directory(
-    train_dir,
+# evaluation generator for test
+test_generator = eval_datagen.flow_from_dataframe(
+    test_df,
+    x_col='Class Path',
+    y_col='Class',
     target_size=img_size,
     batch_size=batch_size,
     class_mode='categorical',
-    subset='validation',
-    shuffle=True
-)
-
-test_datagen = ImageDataGenerator(rescale=1./255)
-
-test_generator = test_datagen.flow_from_directory(
-    test_dir,
-    target_size=img_size,
-    batch_size=batch_size,
-    class_mode='categorical',
-    shuffle=False
+    shuffle=False  # important so predictions and labels align
 )
 
 # load ViT model backbone
@@ -98,22 +137,16 @@ callbacks = [
 
 # train without validation
 history = vit_model.fit(
-    train_generator,
+    train2_generator,
     epochs=40,
     callbacks=callbacks,
-    validation_data = val_generator
+    validation_data = valid_generator
 )
 
-vit_model.save('vit_model.h5')
+# save models for future use
+os.makedirs('models', exist_ok=True)
+vit_model.save('models/vit_model.h5')
 
-# prediction on training set (just rescale/normalize)
-train_generator_for_pred = test_datagen.flow_from_directory(
-    train_dir,
-    target_size=img_size,
-    batch_size=batch_size,
-    class_mode='categorical',
-    shuffle=False
-)
 
 # evaluate on test set
 test_loss, test_acc, test_recall = vit_model.evaluate(test_generator)
@@ -138,7 +171,7 @@ y_pred_train = np.argmax(Y_pred_train, axis=1)
 y_true_train = train_generator_for_pred.classes
 
 # labels
-labels = list(train_generator.class_indices.keys())
+labels = list(train2_generator.class_indices.keys())
 
 # training classification report and confusion matrix
 print("\n--- Classification Report: TRAINING DATA ---")

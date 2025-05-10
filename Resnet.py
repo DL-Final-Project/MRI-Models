@@ -16,6 +16,13 @@ tf.config.threading.set_intra_op_parallelism_threads(8)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 plt.switch_backend('agg')
 
+'''
+create_df - take a directory and return a dataframe with data and labels
+
+parameters  image path  the directory of images to parse
+returns     image_df    dataframe with data and labels
+
+'''
 def create_df(image_path):
     classes, class_paths = zip(*[(label, os.path.join(image_path, label, image))
                                  for label in os.listdir(image_path) if os.path.isdir(os.path.join(image_path, label))
@@ -28,11 +35,10 @@ def create_df(image_path):
 train_df = create_df("Training")
 test_df = create_df("Testing")
 
+# split the dataset
 train2_df, valid_df = train_test_split(train_df, train_size=0.8, random_state=42, stratify=train_df['Class'])
 
-# -----------------------------------------------------
-# 1) Set Up Image Generators
-# -----------------------------------------------------
+
 # Use data augmentation on the training set to help the model generalize
 train_datagen = ImageDataGenerator(
     rescale=1. / 255,
@@ -48,7 +54,7 @@ train_datagen = ImageDataGenerator(
 eval_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
-batch_size = 32
+batch_size = 16
 img_size = (224, 224)
 
 # Larger training split used for evaluating train set metrics, no augmentations
@@ -94,9 +100,7 @@ test_generator = eval_datagen.flow_from_dataframe(
     shuffle=False  # important so predictions and labels align
 )
 
-# -----------------------------------------------------
-# 2) Load the Resnet Model
-# -----------------------------------------------------
+# import resnet
 base_model = ResNet50V2(
     include_top=False,
     weights='imagenet',
@@ -104,6 +108,7 @@ base_model = ResNet50V2(
 
 base_model.trainable = False
 
+# for model add dense layers to end of resnet
 model = Sequential([
     # Block 1
     base_model,
@@ -121,25 +126,22 @@ model = Sequential([
     Dense(4, activation='softmax')  # 4 classes: glioma, meningioma, pituitary, no_tumor
 ])
 
+# compile model with recall and accuracy
 model.compile(
     optimizer=Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
-    metrics=['recall', 'accuracy']
+    metrics=[tf.keras.metrics.Recall(name='recall'), 'accuracy']
 )
 
 model.summary()
 
-# -----------------------------------------------------
-# 3) Set Callbacks
-# -----------------------------------------------------
+
 # EarlyStopping: stop if validation loss does not improve for patience epochs
 # ReduceLROnPlateau: reduce the learning rate when validation loss stops improving
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, verbose=1)
 
-# -----------------------------------------------------
-# 4) Train the Model Frozen then Unfrozen
-# -----------------------------------------------------
+#Train the Model Frozen then Unfrozen
 epochs = 10
 
 history_frozen = model.fit(
@@ -156,7 +158,7 @@ epochs = 30
 model.compile(
     optimizer=Adam(learning_rate=0.00001),
     loss='categorical_crossentropy',
-    metrics=['recall', 'accuracy']
+    metrics=[tf.keras.metrics.Recall(name='recall'), 'accuracy']
 )
 
 history_unfreeze = model.fit(
@@ -166,14 +168,17 @@ history_unfreeze = model.fit(
     callbacks=[early_stopping, reduce_lr]
 )
 
+# save the model for future use
+os.makedirs('models', exist_ok=True)
+model.save('models/resmodel.keras')
+
 # Combine the histories
 history = {}
 for keys in history_frozen.history:
     history[keys] = history_frozen.history[keys] + history_unfreeze.history[keys]
 
-# -----------------------------------------------------
-# 5) Evaluate on Test and Train Set
-# -----------------------------------------------------
+
+# Evaluate on Test and Train Set
 test_metrics = model.evaluate(test_generator, return_dict = True)
 print(f"Test Loss: {test_metrics['loss']:.4f}")
 print(f"Test Recall: {test_metrics['recall']:.4f}")
@@ -184,9 +189,9 @@ print(f"Train Loss: {train_metrics['loss']:.4f}")
 print(f"Train Recall: {train_metrics['recall']:.4f}")
 print(f"Train Accuracy: {train_metrics['accuracy']:.4f}\n")
 
-# -----------------------------------------------------
-# 6) Plot Training Curves
-# -----------------------------------------------------
+
+# Plot Training Curves
+# Plot accuracy and save
 plt.figure()
 plt.plot(history['accuracy'], label='train_accuracy')
 plt.plot(history['val_accuracy'], label='val_accuracy')
@@ -199,6 +204,7 @@ os.makedirs('temp/resnet', exist_ok=True)
 plt.savefig(f'temp/resnet/res_accuracy.png')
 plt.close()
 
+# plot recall and save
 plt.figure()
 plt.plot(history['recall'], label='train_recall')
 plt.plot(history['val_recall'], label='val_recall')
@@ -209,6 +215,7 @@ plt.legend()
 plt.savefig(f'temp/resnet/res_recall.png')
 plt.close()
 
+# plot loss and save
 plt.figure()
 plt.plot(history['loss'], label='train_loss')
 plt.plot(history['val_loss'], label='val_loss')
@@ -219,11 +226,11 @@ plt.legend()
 plt.savefig(f'temp/resnet/res_val_loss.png')
 plt.close()
 
-# -----------------------------------------------------
-# 7) Generate Classification Report & Confusion Matrix
-# -----------------------------------------------------
+
+# Generate Classification Report & Confusion Matrix
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
+# get lables
 labels = list(train2_generator.class_indices.keys())
 
 # Predict classes test set
@@ -231,17 +238,18 @@ Y_pred_test = model.predict(test_generator)
 y_pred_test = np.argmax(Y_pred_test, axis=1)
 y_true_test = test_generator.classes
 
+# predict classes train set
 Y_pred_train = model.predict(train_eval)
 y_pred_train = np.argmax(Y_pred_train, axis=1)
 y_true_train = train_eval.classes
 
-# Print classification report
+# Print classification reports
 print("Classification Report (Test Set):")
 print(classification_report(y_true_test, y_pred_test, target_names=labels))
 print("Classification Report (Train Set):")
 print(classification_report(y_true_train, y_pred_train, target_names=labels))
 
-# Confusion matrix
+# Confusion matrix test
 cm_test = confusion_matrix(y_true_test, y_pred_test)
 print("Confusion Matrix (Test Set):")
 print(cm_test)
@@ -249,7 +257,7 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm_test, display_labels = labels)
 disp.plot()
 plt.savefig(f'temp/resnet/test_res_cm_display.png')
 
-# Confusion matrix
+# Confusion matrix train
 cm_train = confusion_matrix(y_true_train, y_pred_train)
 print("Confusion Matrix (Train set):")
 print(cm_train)
@@ -257,5 +265,4 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm_train, display_labels = labels
 disp.plot()
 plt.savefig(f'temp/resnet/train_res_cm_display.png')
 
-# save the model for future use
-model.save('resmodel.keras')
+

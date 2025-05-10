@@ -4,3 +4,4 @@
 /HarvardDataset
 *.jpg
 *.keras
+/models

@@ -30,21 +30,20 @@ train2_df, valid_df = train_test_split(train_df, random_state=42, stratify=train
 
 # Use data augmentation on the training set to help the model generalize
 train_datagen = ImageDataGenerator(
-    rescale=1. / 255,
-    rotation_range=15,
+    rescale=1 / 255,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
     width_shift_range=0.1,
     height_shift_range=0.1,
-    zoom_range=0.1,
-    horizontal_flip=True,
-    fill_mode='nearest'
-)
+    vertical_flip=True)
 
 # For test data, just rescale
 eval_datagen = ImageDataGenerator(rescale=1. / 255)
 
 # Create iterators
 batch_size = 32
-img_size = (512, 512)
+img_size = (224, 224)
 
 train_eval = eval_datagen.flow_from_dataframe(
     train_df,
@@ -90,7 +89,7 @@ test_generator = eval_datagen.flow_from_dataframe(
 
 
 # Load a CNN Model
-model = tf.keras.models.load_model('23CNN_Harvard.keras')
+model = tf.keras.models.load_model('models/VGG16_Harvard.keras')
 model.summary()
 
 # Evaluate on Test/Train Set
